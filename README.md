@@ -1,6 +1,6 @@
 # php-fpm-guard
 Php-fpm-guard is a minimal bash daemon like service. It checks all the php-fpm servers on own machine, and if any php-fpm service is too slow (able freezing) or response with error, restarts it,
-write log to self logfile, and store php-fpm status to individual file.
+write log to self logfile, and stores php-fpm status in individual file.
 
 Php-fpm-guard is not a real service, it is a simple bash script. It runs in background. It manadges itself.
 
