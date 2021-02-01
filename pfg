@@ -1,0 +1,170 @@
+#!/bin/bash
+# Php-fpm guard V.: 0.2.20210128
+# Ez a script ellenőrzi, hogy a PHP-FPM összes verziója rendben fut-e. A szempontok, amiket figyel:
+# - Milyen gyorsan ad választ egy php-fpm szerver
+# - Milyen status kóddal ad választ
+# FCGI url: http://www.inanzzz.com/index.php/post/653v/testing-php-fpm-without-having-a-web-server
+# fpm konfig beállítások:
+# ping.path=/ping
+# ping.response=pong
+# pm.status_path = /status
+# emergency_restart_threshold 10
+# emergency_restart_interval 1m
+# process_control_timeout 10s
+#
+CMD=$1
+RUNFILE=/var/run/phpfpmguard.run
+LOG=/var/log/php-fpm/pfg.log
+PONG_STANDARD_OUTPUT='Content-type: text/plain;charset=UTF-8
+Expires: Thu, 01 Jan 1970 00:00:00 GMT
+Cache-Control: no-cache, no-store, must-revalidate, max-age=0
+
+pong'
+PID=""
+NAME=pfg
+
+checkFpmSocket() {
+    SOCKET=$1
+    SERVICE=${SOCKET:13:10}
+    URL=/ping
+    FROM=`date +%s`
+    output=`SCRIPT_NAME=$URL SCRIPT_FILENAME=$URL REQUEST_METHOD=GET timeout 6s cgi-fcgi -bind -connect $SOCKET 2>&1`
+    EXIT_STATUS=$?
+    TO=`date +%s`
+    SECONDS=$(($TO - $FROM))
+    # Ha a kimeneti érték nem szabványos
+    if [ "$EXIT_STATUS" != "0" ] ; then
+        log "$SERVICE exit status differ: $EXIT_STATUS"
+    fi
+    # A kimeneti tartalom változása esetén naplózzuk - egyelőre - a kimeneti változást
+    if [ "$output" != "$PONG_STANDARD_OUTPUT" ] ; then
+        LAST_OUTPUT_LOG=`date +"/var/log/php-fpm/pfg/%Y.%m.%d_%H:%M:%S-$SERVICE.out.log"`
+        echo "$output" > $LAST_OUTPUT_LOG
+        log "$SERVICE output differ: $LAST_OUTPUT_LOG"
+    fi
+    # A lassú válasz általában azért fordul elő, mert a szerviz éppen újraindul. Tehát csak a túl lassú válasz az érdekes. Ez most jelenleg legalább 5 másodperc
+    if (( "$SECONDS" > "4" )) ; then
+        log "$SERVICE TO SLOW! ($SECONDS s) Restart"
+        systemctl restart $SERVICE
+    elif (( "$SECONDS" > "2" )) ; then
+        log "$SERVICE slow response: $SECONDS seconds"
+        FN=`date +"/var/log/php-fpm/pfg/$SERVICE-$SECONDS-%Y.%m.%d_%H:%M:%S.status.full"`
+        QUERY_STRING=full SCRIPT_NAME=/status SCRIPT_FILENAME=/status REQUEST_METHOD=GET cgi-fcgi -bind -connect $SOCKET > $FN
+#    else
+#        SERVICE=${SOCKET:13:10}
+#        log "$SERVICE response speed ok: $SECONDS"
+    fi
+}
+
+# PHP4.4 szervíz ellenőrzése így nem lehetséges, a többit ellenőrzi.
+checkAllPhpFpmServer() {
+    SOCKS=`ls /var/run/php/php*-fpm.www-data.default.sock`
+    for SOCK in $SOCKS ; do
+        if [ "$SOCK" != "/var/run/php/php4.4-fpm.www-data.default.sock" ] ; then
+            checkFpmSocket $SOCK
+        fi
+    done
+    # /var/run/php/php5.6-fpm.www-data.default.sock  /var/run/php/php7.2-fpm.www-data.default.sock /var/run/php/php5.3-fpm.www-data.default.sock  /var/run/php/php7.1-fpm.www-data.default.sock
+}
+
+go() {
+    log "Start $NAME"
+    while true; do
+        checkAllPhpFpmServer
+        sleep 10
+    done
+}
+
+log() {
+    msg=$1
+    date +"%Y.%m.%d %H:%M:%S    $msg"
+}
+
+
+killpid() {
+    if [ "$PID" != "" ] ; then
+        kill $PID
+        while kill -0 $PID 2> /dev/null; do 
+            sleep 1
+        done
+    fi
+    if [ -e $RUNFILE ] ; then
+        rm $RUNFILE
+    fi
+}
+
+if [ -e $RUNFILE ] ; then
+    PID=`cat $RUNFILE`
+    if (( "$PID" > "0" )) ; then
+        kill -s 0 $PID 2> /dev/null
+        EXIT=$?
+        if (( "$EXIT" > "0" )) ; then
+            rm $RUNFILE
+            echo "A $NAME nem fut, bár a $RUNFILE fajl letezett. Töröltem."
+        fi
+    else
+        rm $RUNFILE
+        echo "Hibás PID érték: '$PID' A $RUNFILE fájlt törlöltem."
+        PID=""
+    fi
+fi
+if [ "$CMD" = "run" ] ; then
+    if [ "$PID" = "" ] ; then
+        echo $$ > $RUNFILE
+        go
+    else
+        echo "A $NAME már fut ($PID)"
+    fi
+elif [ "$CMD" = "once" ] ; then
+    checkAllPhpFpmServer
+elif [ "$CMD" = "start" ] ; then
+    if [ "$PID" = "" ] ; then
+        nohup ./pfg run 0<&- &>>$LOG &
+        echo "$NAME elindítva ..."
+    else
+        echo "A $NAME már fut ($PID), start nem engedélyezett"
+    fi
+elif [ "$CMD" = "stop" ] ; then
+    if [ "$PID" = "" ] ; then
+        echo "A $NAME már nem fut!"
+    else
+        killpid
+        echo "$NAME leállítva."
+    fi
+elif [ "$CMD" = "restart" ] ; then
+    killpid
+    nohup ./pfg run 0<&- &>>$LOG &
+    echo "$NAME újraindítva ..."
+elif [ "$CMD" = "status" ] ; then
+    if [ "$PID" = "" ] ; then
+        echo "A $NAME nem fut!"
+    else
+        kill -s 0 $PID 2> /dev/null
+        EXIT=$?
+        if (( "$EXIT" > "0" )) ; then
+            echo "A $NAME nem fut: a $RUNFILE fajl letezik, de a $PID process nem ($EXIT)"
+        else
+            echo "A $NAME rendben fut. PID=$PID process létezik."
+        fi
+    fi
+elif [ "$CMD" = "check" ] ; then
+    if [ "$PID" = "" ] ; then
+        echo "A $NAME nem fut!"
+    else
+        kill -s 0 $PID 2> /dev/null
+        EXIT=$?
+        if (( "$EXIT" > "0" )) ; then
+            echo "A $NAME nem fut: a $RUNFILE fajl letezik, de a $PID process nem ($EXIT)"
+        fi
+    fi
+else
+    cat <<EOF
+Php-fpm Guard
+Használata ./$NAME param
+    stop        Leállítása a háttérből
+    start       Indítása a háttérben
+    restart     Indítása a háttérben
+    status      Állapot lekérdezése
+    check       Futás ellenőrzése. Ha nem fut, nem indítja újra, de kiírja, hogy baj van. Különben nem ír ki semmit. Cron-ból futtatható.
+EOF
+fi
