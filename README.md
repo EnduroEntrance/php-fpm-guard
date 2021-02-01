@@ -21,20 +21,22 @@ Define a minimal /ping request's response in php-fpm.conf file for each service.
 ### 1.) Php-fpm Service Response Is Too Slow
 Php-fpm-guard checks all php-fpm services in every 10 seconds. It sends a very minimal request to a php-fpm server (/ping). 
 
+If the response time bigger than 6 seconds, php-fpm-guard do not wait too.
+
 If the response time is bigger than 4 seconds, then php-fpm-guard 
 - restarts the php-fpm server
 - writes message to the php-fpm log file
-- write /status response content into the pfg subdirectory
+- NOT writes /status response content into any file
 
-If the response time bigger than 6 seconds, php-fpm-guard do not wait too.
-
-If the response time less than 5 seconds, but it more than 3 seconds, php-fpm-guard only writes message to the php-fpm log file.
+If the response time is between 3 and 4 seconds, php-fpm-guard 
+- writes message to the php-fpm log file.
+- writes /status response content into the pfg subdirectory
 
 ### 2.) Php-fpm Gives An Invalid Response
-The /ping request response is fix if the php-fpm service works perfectly.
+The /ping request response is fix if the php-fpm service works properly.
 
-If the /ping response differs from the standard (sotred in bash script), it 
+If the /ping response differs from the standard (sotred in bash script) response, it 
 - writes message to the php-fpm log file
-- write /status response content into the pfg subdirectory
+- writes /status response content into the pfg subdirectory
 
-Currently even not restart if. It is under construction.
+Currently php-fpm-guard does not even restart the php-fpm service. It is under construction...
