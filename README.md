@@ -30,7 +30,7 @@ If the response time bigger than 6 seconds, php-fpm-guard do not wait too.
 
 If the response time less than 5 seconds, but it more than 3 seconds, php-fpm-guard only writes message to the php-fpm log file.
 
-### 2.) Php-fpm invalid response
+### 2.) Php-fpm Gives An Invalid Response
 The /ping request response is fix if the php-fpm service works perfectly.
 
 If the /ping response differs from the standard (sotred in bash script), it 
